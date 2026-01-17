@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: OTelShield control plane (policies + audit summaries)
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+
+Resources:
+  PoliciesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: otelshield_policies
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tenantId
+          AttributeType: S
+        - AttributeName: version
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenantId
+          KeyType: HASH
+        - AttributeName: version
+          KeyType: RANGE
+
+  ActiveTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: otelshield_active
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tenantId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenantId
+          KeyType: HASH
+
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: otelshield_audit_counts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tenantDay
+          AttributeType: S
+        - AttributeName: ruleId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenantDay
+          KeyType: HASH
+        - AttributeName: ruleId
+          KeyType: RANGE
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: cmd/api
+      Handler: api
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          POLICIES_TABLE: !Ref PoliciesTable
+          ACTIVE_TABLE: !Ref ActiveTable
+          AUDIT_TABLE: !Ref AuditTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PoliciesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ActiveTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuditTable
+      Events:
+        GetActivePolicy:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/policy/active
+            Method: GET
+        PostPolicy:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/policy
+            Method: POST
+        SimulatePolicy:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/policy/simulate
+            Method: POST
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"

@@ -1,0 +1,40 @@
+services:
+  otelshield:
+    build: ../collector
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "13133:13133"
+      - "9464:9464"
+    volumes:
+      - ../collector/config/collector.yaml:/etc/otelcol/config.yaml:ro
+      - ../collector/config/policy.yaml:/etc/otelcol/policy.yaml:ro
+    command: ["--config=/etc/otelcol/config.yaml"]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"
+      - "14250:14250"
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3000:3000"
+
+  sampleapp:
+    build: ../sample-app
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otelshield:4318"
+      OTEL_SERVICE_NAME: "sampleapp"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - otelshield
