@@ -18,10 +18,23 @@ go version
 
 ## Build the Collector (local ocb)
 
+Option A: install ocb via `go install` (simple if Go is already available):
+
 ```bash
 cd /home/satvvik/OTelShield/collector
 go install go.opentelemetry.io/collector/cmd/builder@v0.143.0
 ocb --config builder-config.yaml
+ls -la dist
+```
+
+Option B: download the ocb release binary (Linux amd64):
+
+```bash
+cd /home/satvvik/OTelShield/collector
+curl --proto '=https' --tlsv1.2 -fL -o ocb \
+  https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/cmd%2Fbuilder%2Fv0.143.0/ocb_0.143.0_linux_amd64
+chmod +x ocb
+./ocb --config builder-config.yaml
 ls -la dist
 ```
 

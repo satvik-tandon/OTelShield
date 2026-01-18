@@ -14,7 +14,7 @@ Privacy-preserving OpenTelemetry gateway that scrubs sensitive telemetry before 
 - Mask emails in logs/attributes using regex.
 - Tokenize user identifiers with HMAC (`enduser.id`, `user.id`, `customer.id`).
 
-## Local demo
+## Quick start (local demo)
 
 1) Build and run the stack:
 
@@ -36,9 +36,11 @@ curl -i http://localhost:8080/checkout
 - Prometheus at `http://localhost:9090`.
 - Grafana at `http://localhost:3000`.
 
+The sample app emits intentionally sensitive fields (emails, headers, user IDs) so you can confirm masking, drops, and HMAC tokenization are working.
+
 ## ocb quickstart
 
-If you want a copy/paste ocb build + telemetrygen validation flow, see `docs/ocb-quickstart.md`.
+If you want a copy/paste ocb build + telemetrygen validation flow (including the release binary download option), see `docs/ocb-quickstart.md`.
 
 ## Project layout
 
@@ -88,4 +90,5 @@ API routes:
 ## Notes
 
 - Update `collector/config/policy.yaml` to change redaction rules.
+- `collector/config/collector.yaml` wires the processor into traces/metrics/logs pipelines.
 - Sample app emits logs, traces, and metrics with intentionally sensitive fields.
