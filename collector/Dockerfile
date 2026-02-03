@@ -4,7 +4,7 @@ ENV PATH="/go/bin:${PATH}"
 COPY builder-config.yaml ./builder-config.yaml
 COPY processors ./processors
 RUN go install go.opentelemetry.io/collector/cmd/builder@v0.143.0
-RUN ocb --config builder-config.yaml
+RUN builder --config builder-config.yaml
 
 FROM gcr.io/distroless/base-debian12
 WORKDIR /

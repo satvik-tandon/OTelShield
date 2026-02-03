@@ -38,14 +38,14 @@ processors:
         key_id: "tenant_hmac_key"
 
 exporters:
-  jaeger:
-    endpoint: "jaeger:14250"
+  otlp/jaeger:
+    endpoint: "jaeger:4317"
     tls:
       insecure: true
   prometheus:
     endpoint: "0.0.0.0:9464"
-  logging:
-    verbosity: normal
+  debug:
+    verbosity: detailed
 
 extensions:
   health_check:
@@ -57,12 +57,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, redactprocessor, batch]
-      exporters: [jaeger, logging]
+      exporters: [otlp/jaeger, debug]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, redactprocessor, batch]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, redactprocessor, batch]
-      exporters: [logging]
+      exporters: [debug]

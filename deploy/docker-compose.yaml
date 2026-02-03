@@ -2,7 +2,7 @@ services:
   otelshield:
     build: ../collector
     ports:
-      - "4317:4317"
+      - "14317:4317"
       - "4318:4318"
       - "13133:13133"
       - "9464:9464"

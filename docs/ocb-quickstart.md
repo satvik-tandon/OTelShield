@@ -23,8 +23,15 @@ Option A: install ocb via `go install` (simple if Go is already available):
 ```bash
 cd /home/satvvik/OTelShield/collector
 go install go.opentelemetry.io/collector/cmd/builder@v0.143.0
-ocb --config builder-config.yaml
+builder --config builder-config.yaml
 ls -la dist
+```
+
+Note: `go install` installs the binary as `builder`. If you prefer `ocb`, create a symlink:
+
+```bash
+ln -s "$HOME/go/bin/builder" "$HOME/go/bin/ocb"
+ocb --config builder-config.yaml
 ```
 
 Option B: download the ocb release binary (Linux amd64):
@@ -53,7 +60,7 @@ go install github.com/open-telemetry/opentelemetry-collector-contrib/cmd/telemet
 $GOBIN/telemetrygen traces --otlp-insecure --traces 3 --otlp-endpoint localhost:4317
 ```
 
-You should see spans in the Collector stdout via the logging exporter.
+You should see spans in the Collector stdout via the debug exporter.
 
 ## Optional: OpenTelemetry Demo (realistic traffic)
 
