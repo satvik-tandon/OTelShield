@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +37,18 @@ type activePolicyResponse struct {
 	Version   string          `json:"version"`
 	Policy    json.RawMessage `json:"policy"`
 	UpdatedAt string          `json:"updatedAt"`
+}
+
+type auditCountRequest struct {
+	RuleID string `json:"ruleId"`
+	Count  int64  `json:"count"`
+	Day    string `json:"day,omitempty"`
+}
+
+type auditCountRecord struct {
+	RuleID    string `json:"ruleId"`
+	Count     int64  `json:"count"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 func main() {
@@ -67,7 +83,11 @@ func (s *server) handler(ctx context.Context, req events.APIGatewayProxyRequest)
 
 	switch {
 	case req.HTTPMethod == http.MethodGet && strings.HasSuffix(req.Path, "/policy/active"):
-		return s.handleGetActive(ctx, tenantID)
+		return s.handleGetActive(ctx, tenantID, req.Headers["If-None-Match"])
+	case req.HTTPMethod == http.MethodGet && strings.HasSuffix(req.Path, "/audit"):
+		return s.handleGetAudit(ctx, tenantID, req.QueryStringParameters["day"])
+	case req.HTTPMethod == http.MethodPost && strings.HasSuffix(req.Path, "/audit/counts"):
+		return s.handlePostAuditCount(ctx, tenantID, req.Body)
 	case req.HTTPMethod == http.MethodPost && strings.HasSuffix(req.Path, "/policy/simulate"):
 		return s.handleSimulate(ctx, tenantID, req.Body)
 	case req.HTTPMethod == http.MethodPost && strings.HasSuffix(req.Path, "/policy"):
@@ -77,7 +97,7 @@ func (s *server) handler(ctx context.Context, req events.APIGatewayProxyRequest)
 	}
 }
 
-func (s *server) handleGetActive(ctx context.Context, tenantID string) (events.APIGatewayProxyResponse, error) {
+func (s *server) handleGetActive(ctx context.Context, tenantID, ifNoneMatch string) (events.APIGatewayProxyResponse, error) {
 	activeItem, err := s.ddb.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: &s.activeTable,
 		Key: map[string]types.AttributeValue{
@@ -115,6 +135,13 @@ func (s *server) handleGetActive(ctx context.Context, tenantID string) (events.A
 	if !ok {
 		return errorResponse(http.StatusInternalServerError, "policy payload missing"), nil
 	}
+	etag := policyETag(activeVersion, policyJSON)
+	if matchesETag(ifNoneMatch, etag) {
+		return events.APIGatewayProxyResponse{
+			StatusCode: http.StatusNotModified,
+			Headers:    mergeHeaders(map[string]string{"ETag": etag}),
+		}, nil
+	}
 
 	resp := activePolicyResponse{
 		TenantID:  tenantID,
@@ -123,7 +150,7 @@ func (s *server) handleGetActive(ctx context.Context, tenantID string) (events.A
 		UpdatedAt: updatedAt,
 	}
 
-	return jsonResponse(http.StatusOK, resp), nil
+	return jsonResponseWithHeaders(http.StatusOK, resp, map[string]string{"ETag": etag}), nil
 }
 
 func (s *server) handlePostPolicy(ctx context.Context, tenantID, body string) (events.APIGatewayProxyResponse, error) {
@@ -199,6 +226,99 @@ func (s *server) handleSimulate(_ context.Context, tenantID, body string) (event
 	return jsonResponse(http.StatusOK, response), nil
 }
 
+func (s *server) handlePostAuditCount(ctx context.Context, tenantID, body string) (events.APIGatewayProxyResponse, error) {
+	if strings.TrimSpace(body) == "" {
+		return errorResponse(http.StatusBadRequest, "empty body"), nil
+	}
+
+	var req auditCountRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return errorResponse(http.StatusBadRequest, "invalid JSON"), nil
+	}
+	req.RuleID = strings.TrimSpace(req.RuleID)
+	if req.RuleID == "" {
+		return errorResponse(http.StatusBadRequest, "ruleId is required"), nil
+	}
+	if req.Count <= 0 {
+		req.Count = 1
+	}
+	day, err := normalizeDay(req.Day)
+	if err != nil {
+		return errorResponse(http.StatusBadRequest, err.Error()), nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	tenantDay := auditPartitionKey(tenantID, day)
+	_, err = s.ddb.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: &s.auditTable,
+		Key: map[string]types.AttributeValue{
+			"tenantDay": &types.AttributeValueMemberS{Value: tenantDay},
+			"ruleId":    &types.AttributeValueMemberS{Value: req.RuleID},
+		},
+		UpdateExpression: awsString("ADD #count :delta SET #updatedAt = :updatedAt"),
+		ExpressionAttributeNames: map[string]string{
+			"#count":     "count",
+			"#updatedAt": "updatedAt",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":delta":     &types.AttributeValueMemberN{Value: strconv.FormatInt(req.Count, 10)},
+			":updatedAt": &types.AttributeValueMemberS{Value: now},
+		},
+	})
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to write audit count"), nil
+	}
+
+	resp := map[string]any{
+		"tenantId": tenantID,
+		"day":      day,
+		"ruleId":   req.RuleID,
+		"count":    req.Count,
+	}
+	return jsonResponse(http.StatusOK, resp), nil
+}
+
+func (s *server) handleGetAudit(ctx context.Context, tenantID, dayParam string) (events.APIGatewayProxyResponse, error) {
+	day, err := normalizeDay(dayParam)
+	if err != nil {
+		return errorResponse(http.StatusBadRequest, err.Error()), nil
+	}
+	tenantDay := auditPartitionKey(tenantID, day)
+
+	result, err := s.ddb.Query(ctx, &dynamodb.QueryInput{
+		TableName:              &s.auditTable,
+		KeyConditionExpression: awsString("tenantDay = :tenantDay"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":tenantDay": &types.AttributeValueMemberS{Value: tenantDay},
+		},
+	})
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to read audit counts"), nil
+	}
+
+	records := make([]auditCountRecord, 0, len(result.Items))
+	for _, item := range result.Items {
+		ruleID, _ := getStringAttr(item, "ruleId")
+		count, _ := getInt64Attr(item, "count")
+		updatedAt, _ := getStringAttr(item, "updatedAt")
+		if ruleID == "" {
+			continue
+		}
+		records = append(records, auditCountRecord{
+			RuleID:    ruleID,
+			Count:     count,
+			UpdatedAt: updatedAt,
+		})
+	}
+
+	resp := map[string]any{
+		"tenantId": tenantID,
+		"day":      day,
+		"counts":   records,
+	}
+	return jsonResponse(http.StatusOK, resp), nil
+}
+
 func getStringAttr(item map[string]types.AttributeValue, key string) (string, bool) {
 	value, ok := item[key]
 	if !ok {
@@ -211,18 +331,39 @@ func getStringAttr(item map[string]types.AttributeValue, key string) (string, bo
 	return s.Value, true
 }
 
+func getInt64Attr(item map[string]types.AttributeValue, key string) (int64, bool) {
+	value, ok := item[key]
+	if !ok {
+		return 0, false
+	}
+	n, ok := value.(*types.AttributeValueMemberN)
+	if !ok {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(n.Value, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
 func jsonResponse(status int, payload any) events.APIGatewayProxyResponse {
+	return jsonResponseWithHeaders(status, payload, nil)
+}
+
+func jsonResponseWithHeaders(status int, payload any, extra map[string]string) events.APIGatewayProxyResponse {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return errorResponse(http.StatusInternalServerError, "failed to encode response")
+		return events.APIGatewayProxyResponse{
+			StatusCode: http.StatusInternalServerError,
+			Headers:    mergeHeaders(nil),
+			Body:       `{"error":"failed to encode response"}`,
+		}
 	}
 	return events.APIGatewayProxyResponse{
 		StatusCode: status,
-		Headers: map[string]string{
-			"Content-Type":                "application/json",
-			"Access-Control-Allow-Origin": "*",
-		},
-		Body: string(body),
+		Headers:    mergeHeaders(extra),
+		Body:       string(body),
 	}
 }
 
@@ -231,4 +372,49 @@ func errorResponse(status int, message string) events.APIGatewayProxyResponse {
 		"error": message,
 	}
 	return jsonResponse(status, payload)
+}
+
+func mergeHeaders(extra map[string]string) map[string]string {
+	headers := map[string]string{
+		"Content-Type":                "application/json",
+		"Access-Control-Allow-Origin": "*",
+	}
+	for key, value := range extra {
+		headers[key] = value
+	}
+	return headers
+}
+
+func policyETag(version, policyJSON string) string {
+	sum := sha256.Sum256([]byte(version + ":" + policyJSON))
+	return `"` + hex.EncodeToString(sum[:]) + `"`
+}
+
+func matchesETag(ifNoneMatch, etag string) bool {
+	candidates := strings.Split(ifNoneMatch, ",")
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == etag {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeDay(day string) (string, error) {
+	day = strings.TrimSpace(day)
+	if day == "" {
+		return time.Now().UTC().Format("2006-01-02"), nil
+	}
+	if _, err := time.Parse("2006-01-02", day); err != nil {
+		return "", fmt.Errorf("invalid day format, expected YYYY-MM-DD")
+	}
+	return day, nil
+}
+
+func auditPartitionKey(tenantID, day string) string {
+	return tenantID + "#" + day
+}
+
+func awsString(v string) *string {
+	return &v
 }

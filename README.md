@@ -35,8 +35,20 @@ curl -i http://localhost:8080/checkout
 - Jaeger UI at `http://localhost:16686`.
 - Prometheus at `http://localhost:9090`.
 - Grafana at `http://localhost:3000`.
+- Local control plane at `http://localhost:18080`.
 
 The sample app emits intentionally sensitive fields (emails, headers, user IDs) so you can confirm masking, drops, and HMAC tokenization are working.
+
+4) (Optional) Verify audit counters:
+
+- Query:
+  `GET http://localhost:18080/tenants/demo/audit?day=YYYY-MM-DD`
+- Prometheus metric:
+  `otelshield_audit_rule_total{tenant_id="demo"}`
+- Grafana dashboard:
+  `Dashboards -> OTelShield -> OTelShield Audit`
+
+Each redaction rule reports counts by `ruleId` (from `rules[].id`; falls back to `type.N` if omitted).
 
 ## ocb quickstart
 
@@ -92,9 +104,23 @@ API routes:
 - `GET /tenants/{tenantId}/policy/active`
 - `POST /tenants/{tenantId}/policy`
 - `POST /tenants/{tenantId}/policy/simulate`
+- `GET /tenants/{tenantId}/audit?day=YYYY-MM-DD`
+- `POST /tenants/{tenantId}/audit/counts`
+
+Audit payload example:
+
+```json
+{
+  "ruleId": "drop_key.http.request.header.authorization",
+  "count": 3,
+  "day": "2026-02-16"
+}
+```
 
 ## Notes
 
 - Update `collector/config/policy.yaml` to change redaction rules.
-- `collector/config/collector.yaml` wires the processor into traces/metrics/logs pipelines.
+- `collector/config/collector.yaml` is the standalone local config.
+- `collector/config/collector.compose.yaml` is the compose config with remote policy/audit against the local mock control plane.
+- Set `rules[].id` in policy for stable audit keys (`drop.secrets`, `mask.email`, `tokenize.user`).
 - Sample app emits logs, traces, and metrics with intentionally sensitive fields.

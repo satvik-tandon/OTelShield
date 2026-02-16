@@ -14,19 +14,16 @@ processors:
   batch: {}
   redactprocessor:
     policy_source:
-      mode: "local"
-      file: "/etc/otelcol/policy.yaml"
-      # AWS control plane mode example:
-      # mode: "aws"
-      # endpoint: "https://<api-id>.execute-api.<region>.amazonaws.com/Prod/tenants/{tenant_id}/policy/active"
-      # tenant_id: "demo"
-      # api_key: "<optional-api-key>"
+      mode: "aws"
+      endpoint: "http://controlplane:8081/tenants/{tenant_id}/policy/active"
+      tenant_id: "demo"
+      refresh_interval: "30s"
+      timeout: "3s"
     audit:
-      enabled: false
-      # endpoint: "https://<api-id>.execute-api.<region>.amazonaws.com/Prod/tenants/{tenant_id}/audit/counts"
-      # tenant_id: "demo"
-      # api_key: "<optional-api-key>"
-      flush_interval: "15s"
+      enabled: true
+      endpoint: "http://controlplane:8081/tenants/{tenant_id}/audit/counts"
+      tenant_id: "demo"
+      flush_interval: "10s"
       timeout: "3s"
     hmac_secrets:
       tenant_hmac_key: "local_dev_secret"

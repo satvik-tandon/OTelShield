@@ -1,4 +1,14 @@
 services:
+  controlplane:
+    build: ./mock-controlplane
+    environment:
+      LISTEN_ADDR: ":8081"
+      INITIAL_POLICY_PATH: "/data/policy.yaml"
+    volumes:
+      - ../collector/config/policy.yaml:/data/policy.yaml:ro
+    ports:
+      - "18080:8081"
+
   otelshield:
     build: ../collector
     ports:
@@ -7,9 +17,11 @@ services:
       - "13133:13133"
       - "9464:9464"
     volumes:
-      - ../collector/config/collector.yaml:/etc/otelcol/config.yaml:ro
+      - ../collector/config/collector.compose.yaml:/etc/otelcol/config.yaml:ro
       - ../collector/config/policy.yaml:/etc/otelcol/policy.yaml:ro
     command: ["--config=/etc/otelcol/config.yaml"]
+    depends_on:
+      - controlplane
 
   jaeger:
     image: jaegertracing/all-in-one:1.57
@@ -26,6 +38,9 @@ services:
 
   grafana:
     image: grafana/grafana:11.3.0
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
 

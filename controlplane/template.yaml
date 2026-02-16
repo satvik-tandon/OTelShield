@@ -88,6 +88,16 @@ Resources:
           Properties:
             Path: /tenants/{tenantId}/policy/simulate
             Method: POST
+        GetAudit:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/audit
+            Method: GET
+        PostAuditCount:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/audit/counts
+            Method: POST
 
 Outputs:
   ApiEndpoint:

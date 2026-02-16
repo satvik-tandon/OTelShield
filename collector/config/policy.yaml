@@ -2,12 +2,14 @@ hmac_secrets:
   tenant_hmac_key: "local_dev_secret"
 
 rules:
-  - type: "drop_key"
+  - id: "drop.secrets"
+    type: "drop_key"
     match_keys:
       - "http.request.header.authorization"
       - "http.request.header.cookie"
       - "db.statement"
-  - type: "mask_regex"
+  - id: "mask.email"
+    type: "mask_regex"
     fields:
       - "log.body"
       - "attributes.exception.message"
@@ -15,7 +17,8 @@ rules:
       - "attributes.url.full"
     pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
     replacement: "[EMAIL_REDACTED]"
-  - type: "tokenize_hmac"
+  - id: "tokenize.user"
+    type: "tokenize_hmac"
     match_keys:
       - "enduser.id"
       - "user.id"

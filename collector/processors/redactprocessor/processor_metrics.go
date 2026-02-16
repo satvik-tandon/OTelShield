@@ -7,10 +7,16 @@ import (
 )
 
 func (rp *redactProcessor) processMetrics(_ context.Context, md pmetric.Metrics) (pmetric.Metrics, error) {
+	policy := rp.activePolicy()
+	if policy == nil {
+		return md, nil
+	}
+	ruleHits := map[string]int64{}
+
 	resources := md.ResourceMetrics()
 	for i := 0; i < resources.Len(); i++ {
 		rm := resources.At(i)
-		rp.policy.applyResourceAttributes(rm.Resource().Attributes())
+		policy.applyResourceAttributes(rm.Resource().Attributes(), ruleHits)
 		scopeMetrics := rm.ScopeMetrics()
 		for j := 0; j < scopeMetrics.Len(); j++ {
 			metrics := scopeMetrics.At(j).Metrics()
@@ -18,42 +24,43 @@ func (rp *redactProcessor) processMetrics(_ context.Context, md pmetric.Metrics)
 				metric := metrics.At(k)
 				switch metric.Type() {
 				case pmetric.MetricTypeGauge:
-					applyNumberDataPoints(metric.Gauge().DataPoints(), rp)
+					applyNumberDataPoints(metric.Gauge().DataPoints(), policy, ruleHits)
 				case pmetric.MetricTypeSum:
-					applyNumberDataPoints(metric.Sum().DataPoints(), rp)
+					applyNumberDataPoints(metric.Sum().DataPoints(), policy, ruleHits)
 				case pmetric.MetricTypeHistogram:
-					applyHistogramDataPoints(metric.Histogram().DataPoints(), rp)
+					applyHistogramDataPoints(metric.Histogram().DataPoints(), policy, ruleHits)
 				case pmetric.MetricTypeExponentialHistogram:
-					applyExponentialHistogramDataPoints(metric.ExponentialHistogram().DataPoints(), rp)
+					applyExponentialHistogramDataPoints(metric.ExponentialHistogram().DataPoints(), policy, ruleHits)
 				case pmetric.MetricTypeSummary:
-					applySummaryDataPoints(metric.Summary().DataPoints(), rp)
+					applySummaryDataPoints(metric.Summary().DataPoints(), policy, ruleHits)
 				}
 			}
 		}
 	}
+	rp.addAuditHits(ruleHits)
 	return md, nil
 }
 
-func applyNumberDataPoints(points pmetric.NumberDataPointSlice, rp *redactProcessor) {
+func applyNumberDataPoints(points pmetric.NumberDataPointSlice, policy *compiledPolicy, ruleHits map[string]int64) {
 	for i := 0; i < points.Len(); i++ {
-		rp.policy.applyAttributeRules(points.At(i).Attributes(), rp.policy.maskAttributeRules)
+		policy.applyAttributeRules(points.At(i).Attributes(), policy.maskAttributeRules, ruleHits)
 	}
 }
 
-func applyHistogramDataPoints(points pmetric.HistogramDataPointSlice, rp *redactProcessor) {
+func applyHistogramDataPoints(points pmetric.HistogramDataPointSlice, policy *compiledPolicy, ruleHits map[string]int64) {
 	for i := 0; i < points.Len(); i++ {
-		rp.policy.applyAttributeRules(points.At(i).Attributes(), rp.policy.maskAttributeRules)
+		policy.applyAttributeRules(points.At(i).Attributes(), policy.maskAttributeRules, ruleHits)
 	}
 }
 
-func applyExponentialHistogramDataPoints(points pmetric.ExponentialHistogramDataPointSlice, rp *redactProcessor) {
+func applyExponentialHistogramDataPoints(points pmetric.ExponentialHistogramDataPointSlice, policy *compiledPolicy, ruleHits map[string]int64) {
 	for i := 0; i < points.Len(); i++ {
-		rp.policy.applyAttributeRules(points.At(i).Attributes(), rp.policy.maskAttributeRules)
+		policy.applyAttributeRules(points.At(i).Attributes(), policy.maskAttributeRules, ruleHits)
 	}
 }
 
-func applySummaryDataPoints(points pmetric.SummaryDataPointSlice, rp *redactProcessor) {
+func applySummaryDataPoints(points pmetric.SummaryDataPointSlice, policy *compiledPolicy, ruleHits map[string]int64) {
 	for i := 0; i < points.Len(); i++ {
-		rp.policy.applyAttributeRules(points.At(i).Attributes(), rp.policy.maskAttributeRules)
+		policy.applyAttributeRules(points.At(i).Attributes(), policy.maskAttributeRules, ruleHits)
 	}
 }

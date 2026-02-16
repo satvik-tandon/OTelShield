@@ -25,6 +25,7 @@ func NewFactory() processor.Factory {
 func createDefaultConfig() component.Config {
 	return &Config{
 		PolicySource: PolicySource{Mode: "local"},
+		Audit:        AuditSink{},
 		HMACSecrets:  map[string]string{},
 		Rules:        []Rule{},
 	}
@@ -40,7 +41,15 @@ func createLogsProcessor(
 	if err != nil {
 		return nil, err
 	}
-	return processorhelper.NewLogs(ctx, set, cfg, next, rp.processLogs)
+	return processorhelper.NewLogs(
+		ctx,
+		set,
+		cfg,
+		next,
+		rp.processLogs,
+		processorhelper.WithStart(rp.start),
+		processorhelper.WithShutdown(rp.shutdown),
+	)
 }
 
 func createTracesProcessor(
@@ -53,7 +62,15 @@ func createTracesProcessor(
 	if err != nil {
 		return nil, err
 	}
-	return processorhelper.NewTraces(ctx, set, cfg, next, rp.processTraces)
+	return processorhelper.NewTraces(
+		ctx,
+		set,
+		cfg,
+		next,
+		rp.processTraces,
+		processorhelper.WithStart(rp.start),
+		processorhelper.WithShutdown(rp.shutdown),
+	)
 }
 
 func createMetricsProcessor(
@@ -66,5 +83,13 @@ func createMetricsProcessor(
 	if err != nil {
 		return nil, err
 	}
-	return processorhelper.NewMetrics(ctx, set, cfg, next, rp.processMetrics)
+	return processorhelper.NewMetrics(
+		ctx,
+		set,
+		cfg,
+		next,
+		rp.processMetrics,
+		processorhelper.WithStart(rp.start),
+		processorhelper.WithShutdown(rp.shutdown),
+	)
 }
