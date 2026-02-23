@@ -342,7 +342,7 @@
           </div>
           <div class="field" style="grid-column: span 1;">
             <label>&nbsp;</label>
-            <button class="btn btn-secondary" id="health">Health</button>
+            <button class="btn btn-secondary" id="health">Check Health</button>
           </div>
         </div>
         <div class="divider"></div>
@@ -373,12 +373,12 @@
       <section class="panel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">Active Policy</div>
+            <div class="panel-title">Policy Draft</div>
             <div class="panel-subtitle" id="policyMeta"></div>
           </div>
           <div class="inline" style="flex: 0 0 auto;">
-            <button class="btn btn-ghost" id="loadPolicy">Load Policy</button>
-            <button class="btn btn-primary" id="savePolicy">Save Policy</button>
+            <button class="btn btn-ghost" id="loadPolicy">Load Active Policy</button>
+            <button class="btn btn-primary" id="savePolicy">Apply Draft as Active</button>
           </div>
         </div>
         <textarea id="policyEditor"></textarea>
@@ -412,7 +412,6 @@
               <div class="panel-subtitle">Last 30 refreshes</div>
             </div>
             <div class="inline" style="flex: 0 0 auto;">
-              <button class="btn btn-ghost" id="toggleStacked">Stacked: Off</button>
               <button class="btn btn-ghost" id="resetZoom">Reset Zoom</button>
             </div>
           </div>
@@ -460,16 +459,15 @@
       const clearFiltersEl = document.getElementById("clearFilters");
       const intervalEl = document.getElementById("interval");
       const toggleAutoEl = document.getElementById("toggleAuto");
+      const healthBtnEl = document.getElementById("health");
       const chartEl = document.getElementById("chart");
       const legendEl = document.getElementById("legend");
       const eventRowsEl = document.getElementById("eventRows");
-      const toggleStackedEl = document.getElementById("toggleStacked");
       const resetZoomEl = document.getElementById("resetZoom");
       const loadMoreEventsEl = document.getElementById("loadMoreEvents");
       const eventsMetaEl = document.getElementById("eventsMeta");
 
       let autoTimer = null;
-      let stacked = false;
       let viewStart = null;
       let viewEnd = null;
       let dragState = null;
@@ -527,7 +525,7 @@
       }
 
       function renderPolicy(data) {
-        policyMetaEl.textContent = `Tenant: ${data.tenantId} | Version: ${data.version} | Updated: ${data.updatedAt}`;
+        policyMetaEl.textContent = `Active policy | Tenant: ${data.tenantId} | Version: ${data.version} | Updated: ${data.updatedAt}`;
         policyEditorEl.value = JSON.stringify(data.policy, null, 2);
       }
 
@@ -580,20 +578,7 @@
         const rangeStart = viewStart ?? 0;
         const rangeEnd = viewEnd ?? (maxHistory - 1);
         const rangeLen = Math.max(1, rangeEnd - rangeStart);
-        let maxVal = 1;
-        if (stacked) {
-          const stack = new Array(rangeLen + 1).fill(0);
-          series.forEach((points) => {
-            for (let i = rangeStart; i <= rangeEnd; i++) {
-              const p = points[i];
-              const v = p ? p.v : 0;
-              stack[i - rangeStart] += v;
-            }
-          });
-          maxVal = Math.max(1, ...stack);
-        } else {
-          maxVal = Math.max(1, ...series.flatMap(s => s.map(p => p.v)));
-        }
+        const maxVal = Math.max(1, ...series.flatMap(s => s.map(p => p.v)));
 
         legendEl.innerHTML = "";
         topRules.forEach((rule, idx) => {
@@ -611,43 +596,22 @@
 
         if (topRules.length === 0) return;
 
-        if (stacked) {
-          const stackValues = new Array(rangeLen + 1).fill(0);
-          topRules.forEach((rule, idx) => {
-            const color = palette[idx % palette.length];
-            const points = history[rule] || [];
-            ctx.beginPath();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
-            for (let i = rangeStart; i <= rangeEnd; i++) {
-              const p = points[i];
-              const v = p ? p.v : 0;
-              stackValues[i - rangeStart] += v;
-              const x = padding + ((i - rangeStart) / rangeLen) * plotW;
-              const y = padding + plotH - (stackValues[i - rangeStart] / maxVal) * plotH;
-              if (i === rangeStart) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-          });
-        } else {
-          topRules.forEach((rule, idx) => {
-            const color = palette[idx % palette.length];
-            const points = history[rule] || [];
-            ctx.beginPath();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
-            for (let i = rangeStart; i <= rangeEnd; i++) {
-              const p = points[i];
-              const v = p ? p.v : 0;
-              const x = padding + ((i - rangeStart) / rangeLen) * plotW;
-              const y = padding + plotH - (v / maxVal) * plotH;
-              if (i === rangeStart) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-          });
-        }
+        topRules.forEach((rule, idx) => {
+          const color = palette[idx % palette.length];
+          const points = history[rule] || [];
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          for (let i = rangeStart; i <= rangeEnd; i++) {
+            const p = points[i];
+            const v = p ? p.v : 0;
+            const x = padding + ((i - rangeStart) / rangeLen) * plotW;
+            const y = padding + plotH - (v / maxVal) * plotH;
+            if (i === rangeStart) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        });
 
         if (dragState) {
           const x1 = Math.min(dragState.startX, dragState.currentX);
@@ -683,11 +647,18 @@
       }
 
       async function checkHealth() {
+        const previousLabel = healthBtnEl.textContent;
+        healthBtnEl.disabled = true;
+        healthBtnEl.textContent = "Checking...";
+        const checkedAt = new Date();
         try {
           const health = await fetchJson("/health");
-          healthStatusEl.innerHTML = `Health: <span class="${health.ok ? "ok" : "warn"}">${health.ok ? "ok" : "not ok"}</span>`;
+          healthStatusEl.innerHTML = `Health: <span class="${health.ok ? "ok" : "warn"}">${health.ok ? "ok" : "not ok"}</span> · checked ${checkedAt.toLocaleTimeString()}`;
         } catch (err) {
-          healthStatusEl.textContent = "Health: error";
+          healthStatusEl.innerHTML = `Health: <span class="warn">error</span> · checked ${checkedAt.toLocaleTimeString()}`;
+        } finally {
+          healthBtnEl.disabled = false;
+          healthBtnEl.textContent = previousLabel;
         }
       }
 
@@ -701,7 +672,7 @@
           policyStatusEl.className = "status warn";
           return;
         }
-        policyStatusEl.textContent = "Saving...";
+        policyStatusEl.textContent = "Applying draft...";
         try {
           const res = await fetch(`/tenants/${tenant}/policy`, {
             method: "POST",
@@ -709,7 +680,7 @@
             body: JSON.stringify({ policy, activate: true })
           });
           if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-          policyStatusEl.textContent = "Policy saved";
+          policyStatusEl.textContent = "Draft is now active";
           policyStatusEl.className = "status ok";
           refresh();
         } catch (err) {
@@ -835,12 +806,6 @@
         drawChart(lastAuditRows);
       }
 
-      function toggleStacked() {
-        stacked = !stacked;
-        toggleStackedEl.textContent = `Stacked: ${stacked ? "On" : "Off"}`;
-        drawChart(lastAuditRows);
-      }
-
       chartEl.addEventListener("mousedown", (e) => {
         dragState = { startX: e.offsetX, currentX: e.offsetX };
       });
@@ -870,11 +835,10 @@
       });
 
       document.getElementById("refresh").addEventListener("click", refresh);
-      document.getElementById("health").addEventListener("click", checkHealth);
+      healthBtnEl.addEventListener("click", checkHealth);
       document.getElementById("savePolicy").addEventListener("click", savePolicy);
       document.getElementById("loadPolicy").addEventListener("click", refresh);
       document.getElementById("toggleAuto").addEventListener("click", toggleAuto);
-      toggleStackedEl.addEventListener("click", toggleStacked);
       resetZoomEl.addEventListener("click", resetZoom);
       loadMoreEventsEl.addEventListener("click", loadMoreEvents);
       filterEl.addEventListener("input", () => {

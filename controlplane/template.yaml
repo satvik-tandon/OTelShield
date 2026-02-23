@@ -52,6 +52,22 @@ Resources:
         - AttributeName: ruleId
           KeyType: RANGE
 
+  AuditEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: otelshield_audit_events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tenantDay
+          AttributeType: S
+        - AttributeName: eventId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenantDay
+          KeyType: HASH
+        - AttributeName: eventId
+          KeyType: RANGE
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -65,6 +81,7 @@ Resources:
           POLICIES_TABLE: !Ref PoliciesTable
           ACTIVE_TABLE: !Ref ActiveTable
           AUDIT_TABLE: !Ref AuditTable
+          AUDIT_EVENTS_TABLE: !Ref AuditEventsTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PoliciesTable
@@ -72,6 +89,8 @@ Resources:
             TableName: !Ref ActiveTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuditTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuditEventsTable
       Events:
         GetActivePolicy:
           Type: Api
@@ -97,6 +116,16 @@ Resources:
           Type: Api
           Properties:
             Path: /tenants/{tenantId}/audit/counts
+            Method: POST
+        GetAuditEvents:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/audit/events
+            Method: GET
+        PostAuditEvents:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/audit/events
             Method: POST
 
 Outputs:

@@ -11,12 +11,15 @@ type PolicySource struct {
 }
 
 type AuditSink struct {
-	Enabled       bool   `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
-	Endpoint      string `mapstructure:"endpoint" yaml:"endpoint" json:"endpoint"`
-	TenantID      string `mapstructure:"tenant_id" yaml:"tenant_id" json:"tenant_id"`
-	APIKey        string `mapstructure:"api_key" yaml:"api_key" json:"api_key"`
-	FlushInterval string `mapstructure:"flush_interval" yaml:"flush_interval" json:"flush_interval"`
-	Timeout       string `mapstructure:"timeout" yaml:"timeout" json:"timeout"`
+	Enabled        bool   `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Endpoint       string `mapstructure:"endpoint" yaml:"endpoint" json:"endpoint"`
+	TenantID       string `mapstructure:"tenant_id" yaml:"tenant_id" json:"tenant_id"`
+	APIKey         string `mapstructure:"api_key" yaml:"api_key" json:"api_key"`
+	FlushInterval  string `mapstructure:"flush_interval" yaml:"flush_interval" json:"flush_interval"`
+	Timeout        string `mapstructure:"timeout" yaml:"timeout" json:"timeout"`
+	EventsEnabled  bool   `mapstructure:"events_enabled" yaml:"events_enabled" json:"events_enabled"`
+	EventsEndpoint string `mapstructure:"events_endpoint" yaml:"events_endpoint" json:"events_endpoint"`
+	EventsMaxBatch int    `mapstructure:"events_max_batch" yaml:"events_max_batch" json:"events_max_batch"`
 }
 
 type Rule struct {

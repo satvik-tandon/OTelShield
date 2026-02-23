@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -20,10 +22,11 @@ import (
 )
 
 type server struct {
-	ddb           *dynamodb.Client
-	policiesTable string
-	activeTable   string
-	auditTable    string
+	ddb              *dynamodb.Client
+	policiesTable    string
+	activeTable      string
+	auditTable       string
+	auditEventsTable string
 }
 
 type createPolicyRequest struct {
@@ -51,6 +54,29 @@ type auditCountRecord struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
+type auditEventPayload struct {
+	RuleID    string `json:"ruleId"`
+	Action    string `json:"action"`
+	Key       string `json:"key"`
+	Signal    string `json:"signal"`
+	Count     int64  `json:"count"`
+	Timestamp string `json:"timestamp"`
+}
+
+type auditEventsEnvelope struct {
+	Events []auditEventPayload `json:"events"`
+}
+
+type auditEventRecord struct {
+	EventID   string `json:"eventId"`
+	RuleID    string `json:"ruleId"`
+	Action    string `json:"action"`
+	Key       string `json:"key"`
+	Signal    string `json:"signal"`
+	Count     int64  `json:"count"`
+	Timestamp string `json:"timestamp"`
+}
+
 func main() {
 	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
@@ -58,10 +84,11 @@ func main() {
 	}
 
 	s := &server{
-		ddb:           dynamodb.NewFromConfig(cfg),
-		policiesTable: mustEnv("POLICIES_TABLE"),
-		activeTable:   mustEnv("ACTIVE_TABLE"),
-		auditTable:    os.Getenv("AUDIT_TABLE"),
+		ddb:              dynamodb.NewFromConfig(cfg),
+		policiesTable:    mustEnv("POLICIES_TABLE"),
+		activeTable:      mustEnv("ACTIVE_TABLE"),
+		auditTable:       mustEnv("AUDIT_TABLE"),
+		auditEventsTable: mustEnv("AUDIT_EVENTS_TABLE"),
 	}
 
 	lambda.Start(s.handler)
@@ -84,8 +111,22 @@ func (s *server) handler(ctx context.Context, req events.APIGatewayProxyRequest)
 	switch {
 	case req.HTTPMethod == http.MethodGet && strings.HasSuffix(req.Path, "/policy/active"):
 		return s.handleGetActive(ctx, tenantID, req.Headers["If-None-Match"])
+	case req.HTTPMethod == http.MethodGet && strings.HasSuffix(req.Path, "/audit/events"):
+		return s.handleGetAuditEvents(
+			ctx,
+			tenantID,
+			req.QueryStringParameters["day"],
+			req.QueryStringParameters["limit"],
+			req.QueryStringParameters["cursor"],
+			req.QueryStringParameters["ruleId"],
+			req.QueryStringParameters["action"],
+			req.QueryStringParameters["signal"],
+			req.QueryStringParameters["key"],
+		)
 	case req.HTTPMethod == http.MethodGet && strings.HasSuffix(req.Path, "/audit"):
 		return s.handleGetAudit(ctx, tenantID, req.QueryStringParameters["day"])
+	case req.HTTPMethod == http.MethodPost && strings.HasSuffix(req.Path, "/audit/events"):
+		return s.handlePostAuditEvents(ctx, tenantID, req.Body)
 	case req.HTTPMethod == http.MethodPost && strings.HasSuffix(req.Path, "/audit/counts"):
 		return s.handlePostAuditCount(ctx, tenantID, req.Body)
 	case req.HTTPMethod == http.MethodPost && strings.HasSuffix(req.Path, "/policy/simulate"):
@@ -319,6 +360,176 @@ func (s *server) handleGetAudit(ctx context.Context, tenantID, dayParam string) 
 	return jsonResponse(http.StatusOK, resp), nil
 }
 
+func (s *server) handlePostAuditEvents(ctx context.Context, tenantID, body string) (events.APIGatewayProxyResponse, error) {
+	if strings.TrimSpace(body) == "" {
+		return errorResponse(http.StatusBadRequest, "empty body"), nil
+	}
+
+	var envelope auditEventsEnvelope
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		return errorResponse(http.StatusBadRequest, "invalid JSON"), nil
+	}
+
+	eventsPayload := envelope.Events
+	if len(eventsPayload) == 0 {
+		var single auditEventPayload
+		if err := json.Unmarshal([]byte(body), &single); err == nil && strings.TrimSpace(single.RuleID) != "" {
+			eventsPayload = []auditEventPayload{single}
+		}
+	}
+	if len(eventsPayload) == 0 {
+		return errorResponse(http.StatusBadRequest, "no events provided"), nil
+	}
+
+	now := time.Now().UTC()
+	accepted := 0
+	dropped := 0
+	for _, event := range eventsPayload {
+		ruleID := strings.TrimSpace(event.RuleID)
+		if ruleID == "" {
+			dropped++
+			continue
+		}
+		if event.Count <= 0 {
+			event.Count = 1
+		}
+		ts, tsString := parseEventTimestamp(event.Timestamp, now)
+		tenantDay := auditPartitionKey(tenantID, ts.Format("2006-01-02"))
+		eventID := fmt.Sprintf("%s#%s", tsString, randomHex(6))
+
+		item := map[string]types.AttributeValue{
+			"tenantDay": &types.AttributeValueMemberS{Value: tenantDay},
+			"eventId":   &types.AttributeValueMemberS{Value: eventID},
+			"ruleId":    &types.AttributeValueMemberS{Value: ruleID},
+			"action":    &types.AttributeValueMemberS{Value: strings.TrimSpace(event.Action)},
+			"key":       &types.AttributeValueMemberS{Value: strings.TrimSpace(event.Key)},
+			"signal":    &types.AttributeValueMemberS{Value: strings.TrimSpace(event.Signal)},
+			"count":     &types.AttributeValueMemberN{Value: strconv.FormatInt(event.Count, 10)},
+			"timestamp": &types.AttributeValueMemberS{Value: tsString},
+			"createdAt": &types.AttributeValueMemberS{Value: now.Format(time.RFC3339Nano)},
+		}
+		_, err := s.ddb.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName: &s.auditEventsTable,
+			Item:      item,
+		})
+		if err != nil {
+			return errorResponse(http.StatusInternalServerError, "failed to write audit events"), nil
+		}
+		accepted++
+	}
+
+	resp := map[string]any{
+		"tenantId": tenantID,
+		"accepted": accepted,
+		"dropped":  dropped,
+	}
+	return jsonResponse(http.StatusOK, resp), nil
+}
+
+func (s *server) handleGetAuditEvents(ctx context.Context, tenantID, dayParam, limitParam, cursorParam, ruleIDParam, actionParam, signalParam, keyParam string) (events.APIGatewayProxyResponse, error) {
+	day, err := normalizeDay(dayParam)
+	if err != nil {
+		return errorResponse(http.StatusBadRequest, err.Error()), nil
+	}
+	limit := parseLimit(limitParam, 200, 1000)
+	tenantDay := auditPartitionKey(tenantID, day)
+
+	ruleID := strings.TrimSpace(ruleIDParam)
+	action := strings.TrimSpace(actionParam)
+	signal := strings.TrimSpace(signalParam)
+	key := strings.TrimSpace(keyParam)
+
+	query := &dynamodb.QueryInput{
+		TableName:              &s.auditEventsTable,
+		KeyConditionExpression: awsString("tenantDay = :tenantDay"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":tenantDay": &types.AttributeValueMemberS{Value: tenantDay},
+		},
+		ScanIndexForward: awsBool(false),
+	}
+
+	filterNames := map[string]string{}
+	filterValues := query.ExpressionAttributeValues
+	filterParts := make([]string, 0, 4)
+	if ruleID != "" {
+		filterNames["#ruleId"] = "ruleId"
+		filterValues[":ruleId"] = &types.AttributeValueMemberS{Value: ruleID}
+		filterParts = append(filterParts, "contains(#ruleId, :ruleId)")
+	}
+	if action != "" {
+		filterNames["#action"] = "action"
+		filterValues[":action"] = &types.AttributeValueMemberS{Value: action}
+		filterParts = append(filterParts, "#action = :action")
+	}
+	if signal != "" {
+		filterNames["#signal"] = "signal"
+		filterValues[":signal"] = &types.AttributeValueMemberS{Value: signal}
+		filterParts = append(filterParts, "#signal = :signal")
+	}
+	if key != "" {
+		filterNames["#key"] = "key"
+		filterValues[":key"] = &types.AttributeValueMemberS{Value: key}
+		filterParts = append(filterParts, "contains(#key, :key)")
+	}
+	if len(filterParts) > 0 {
+		query.FilterExpression = awsString(strings.Join(filterParts, " AND "))
+		query.ExpressionAttributeNames = filterNames
+	}
+	if limit > 0 {
+		query.Limit = awsInt32(int32(limit))
+	}
+	if strings.TrimSpace(cursorParam) != "" {
+		eventID, err := decodeCursor(cursorParam)
+		if err != nil {
+			return errorResponse(http.StatusBadRequest, "invalid cursor"), nil
+		}
+		query.ExclusiveStartKey = map[string]types.AttributeValue{
+			"tenantDay": &types.AttributeValueMemberS{Value: tenantDay},
+			"eventId":   &types.AttributeValueMemberS{Value: eventID},
+		}
+	}
+
+	result, err := s.ddb.Query(ctx, query)
+	if err != nil {
+		return errorResponse(http.StatusInternalServerError, "failed to read audit events"), nil
+	}
+
+	records := make([]auditEventRecord, 0, len(result.Items))
+	for _, item := range result.Items {
+		eventID, _ := getStringAttr(item, "eventId")
+		ruleID, _ := getStringAttr(item, "ruleId")
+		action, _ := getStringAttr(item, "action")
+		key, _ := getStringAttr(item, "key")
+		signal, _ := getStringAttr(item, "signal")
+		timestamp, _ := getStringAttr(item, "timestamp")
+		count, _ := getInt64Attr(item, "count")
+		if ruleID == "" {
+			continue
+		}
+		records = append(records, auditEventRecord{
+			EventID:   eventID,
+			RuleID:    ruleID,
+			Action:    action,
+			Key:       key,
+			Signal:    signal,
+			Count:     count,
+			Timestamp: timestamp,
+		})
+	}
+
+	resp := map[string]any{
+		"tenantId": tenantID,
+		"day":      day,
+		"events":   records,
+	}
+	if result.LastEvaluatedKey != nil {
+		if eventID, ok := getStringAttr(result.LastEvaluatedKey, "eventId"); ok && eventID != "" {
+			resp["nextCursor"] = encodeCursor(eventID)
+		}
+	}
+	return jsonResponse(http.StatusOK, resp), nil
+}
+
 func getStringAttr(item map[string]types.AttributeValue, key string) (string, bool) {
 	value, ok := item[key]
 	if !ok {
@@ -415,6 +626,72 @@ func auditPartitionKey(tenantID, day string) string {
 	return tenantID + "#" + day
 }
 
+func parseLimit(raw string, fallback, max int) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return fallback
+	}
+	if limit > max {
+		return max
+	}
+	return limit
+}
+
+func parseEventTimestamp(raw string, fallback time.Time) (time.Time, string) {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			utc := ts.UTC()
+			return utc, utc.Format(time.RFC3339Nano)
+		}
+		if ts, err := time.Parse(time.RFC3339, raw); err == nil {
+			utc := ts.UTC()
+			return utc, utc.Format(time.RFC3339Nano)
+		}
+	}
+	utc := fallback.UTC()
+	return utc, utc.Format(time.RFC3339Nano)
+}
+
+func randomHex(n int) string {
+	if n <= 0 {
+		return "0"
+	}
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	return hex.EncodeToString(buf)
+}
+
+func encodeCursor(eventID string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(eventID))
+}
+
+func decodeCursor(cursor string) (string, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil {
+		return "", err
+	}
+	eventID := strings.TrimSpace(string(decoded))
+	if eventID == "" {
+		return "", fmt.Errorf("empty cursor")
+	}
+	return eventID, nil
+}
+
 func awsString(v string) *string {
+	return &v
+}
+
+func awsBool(v bool) *bool {
+	return &v
+}
+
+func awsInt32(v int32) *int32 {
 	return &v
 }

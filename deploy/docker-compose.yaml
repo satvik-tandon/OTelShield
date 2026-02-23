@@ -43,13 +43,3 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
-
-  sampleapp:
-    build: ../sample-app
-    environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otelshield:4318"
-      OTEL_SERVICE_NAME: "sampleapp"
-    ports:
-      - "8080:8080"
-    depends_on:
-      - otelshield

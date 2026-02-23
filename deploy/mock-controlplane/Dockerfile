@@ -8,5 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/mock-controlplane ./m
 FROM gcr.io/distroless/base-debian12
 WORKDIR /
 COPY --from=build /out/mock-controlplane /mock-controlplane
+COPY ui /ui
+ENV UI_DIR=/ui
 EXPOSE 8081
 ENTRYPOINT ["/mock-controlplane"]

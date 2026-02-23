@@ -23,10 +23,10 @@ cd deploy
 docker compose up --build
 ```
 
-2) Trigger telemetry:
+2) Trigger telemetry (recommended):
 
 ```bash
-curl -i http://localhost:8080/checkout
+./run-otel-demo.sh
 ```
 
 3) Verify outputs:
@@ -36,8 +36,9 @@ curl -i http://localhost:8080/checkout
 - Prometheus at `http://localhost:9090`.
 - Grafana at `http://localhost:3000`.
 - Local control plane at `http://localhost:18080`.
+- Control plane UI at `http://localhost:18080/ui/`.
 
-The sample app emits intentionally sensitive fields (emails, headers, user IDs) so you can confirm masking, drops, and HMAC tokenization are working.
+The OpenTelemetry demo services emit high-volume traffic so you can validate masking, drops, tokenization, and audit event capture at realistic scale.
 
 4) (Optional) Verify audit counters:
 
@@ -49,6 +50,12 @@ The sample app emits intentionally sensitive fields (emails, headers, user IDs) 
   `Dashboards -> OTelShield -> OTelShield Audit`
 
 Each redaction rule reports counts by `ruleId` (from `rules[].id`; falls back to `type.N` if omitted).
+
+The control plane UI also includes:
+- Policy editor (`load` + `save`)
+- Audit events table with filters
+- Cursor-based pagination (`Load more`)
+- Local filter persistence in browser storage
 
 ## ocb quickstart
 
@@ -106,6 +113,8 @@ API routes:
 - `POST /tenants/{tenantId}/policy/simulate`
 - `GET /tenants/{tenantId}/audit?day=YYYY-MM-DD`
 - `POST /tenants/{tenantId}/audit/counts`
+- `GET /tenants/{tenantId}/audit/events?day=YYYY-MM-DD&limit=200&cursor=...&ruleId=...&action=...&key=...&signal=...`
+- `POST /tenants/{tenantId}/audit/events`
 
 Audit payload example:
 
@@ -114,6 +123,23 @@ Audit payload example:
   "ruleId": "drop_key.http.request.header.authorization",
   "count": 3,
   "day": "2026-02-16"
+}
+```
+
+Audit events payload example:
+
+```json
+{
+  "events": [
+    {
+      "ruleId": "mask.email",
+      "action": "mask",
+      "key": "log.body",
+      "signal": "logs",
+      "count": 1,
+      "timestamp": "2026-02-22T20:27:40.184830142Z"
+    }
+  ]
 }
 ```
 

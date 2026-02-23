@@ -49,18 +49,33 @@ type policyFile struct {
 	HMACSecrets map[string]string `yaml:"hmac_secrets" json:"hmac_secrets"`
 }
 
+type auditEvent struct {
+	RuleID    string `json:"ruleId"`
+	Action    string `json:"action"`
+	Key       string `json:"key"`
+	Signal    string `json:"signal"`
+	Count     int64  `json:"count"`
+	Timestamp string `json:"timestamp"`
+}
+
+type auditRecorder func(ruleID, action, key, signal string, count int64)
+
 type redactProcessor struct {
-	logger          *zap.Logger
-	cfg             *Config
-	httpClient      *http.Client
-	refreshInterval time.Duration
-	requestTimeout  time.Duration
-	auditEnabled    bool
-	auditEndpoint   string
-	auditTenantID   string
-	auditAPIKey     string
-	auditTimeout    time.Duration
-	auditFlush      time.Duration
+	logger              *zap.Logger
+	cfg                 *Config
+	httpClient          *http.Client
+	refreshInterval     time.Duration
+	requestTimeout      time.Duration
+	auditEnabled        bool
+	auditEndpoint       string
+	auditTenantID       string
+	auditAPIKey         string
+	auditTimeout        time.Duration
+	auditFlush          time.Duration
+	auditEventsEnabled  bool
+	auditEventsEndpoint string
+	auditEventsMaxBatch int
+	auditEventBufferMax int
 
 	mu      sync.RWMutex
 	policy  *compiledPolicy
@@ -70,6 +85,7 @@ type redactProcessor struct {
 	auditMu      sync.Mutex
 	auditRunning bool
 	auditCounts  map[string]int64
+	auditEvents  []auditEvent
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -104,17 +120,19 @@ func newRedactProcessor(cfg component.Config, logger *zap.Logger) (*redactProces
 	}
 
 	rp := &redactProcessor{
-		logger:          logger,
-		cfg:             redactCfg,
-		httpClient:      &http.Client{},
-		refreshInterval: refreshInterval,
-		requestTimeout:  requestTimeout,
-		auditFlush:      auditFlush,
-		auditTimeout:    auditTimeout,
-		stopCh:          make(chan struct{}),
-		doneCh:          make(chan struct{}),
-		auditDone:       make(chan struct{}),
-		auditCounts:     map[string]int64{},
+		logger:              logger,
+		cfg:                 redactCfg,
+		httpClient:          &http.Client{},
+		refreshInterval:     refreshInterval,
+		requestTimeout:      requestTimeout,
+		auditFlush:          auditFlush,
+		auditTimeout:        auditTimeout,
+		auditEventBufferMax: 5000,
+		stopCh:              make(chan struct{}),
+		doneCh:              make(chan struct{}),
+		auditDone:           make(chan struct{}),
+		auditCounts:         map[string]int64{},
+		auditEvents:         []auditEvent{},
 	}
 
 	rp.configureAuditSink()
@@ -370,6 +388,20 @@ func (rp *redactProcessor) configureAuditSink() {
 	if rp.auditAPIKey == "" {
 		rp.auditAPIKey = strings.TrimSpace(rp.cfg.PolicySource.APIKey)
 	}
+
+	if rp.cfg.Audit.EventsEnabled {
+		eventsEndpoint := strings.TrimSpace(rp.cfg.Audit.EventsEndpoint)
+		if eventsEndpoint == "" {
+			rp.logger.Warn("audit events enabled but events_endpoint is empty; disabling audit events")
+		} else {
+			rp.auditEventsEnabled = true
+			rp.auditEventsEndpoint = eventsEndpoint
+			rp.auditEventsMaxBatch = rp.cfg.Audit.EventsMaxBatch
+			if rp.auditEventsMaxBatch <= 0 {
+				rp.auditEventsMaxBatch = 200
+			}
+		}
+	}
 }
 
 func (rp *redactProcessor) auditLoop() {
@@ -388,11 +420,13 @@ func (rp *redactProcessor) auditLoop() {
 		case <-rp.stopCh:
 			ctx, cancel := context.WithTimeout(context.Background(), rp.auditTimeout)
 			rp.flushAuditCounts(ctx)
+			rp.flushAuditEvents(ctx)
 			cancel()
 			return
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), rp.auditTimeout)
 			rp.flushAuditCounts(ctx)
+			rp.flushAuditEvents(ctx)
 			cancel()
 		}
 	}
@@ -409,6 +443,90 @@ func (rp *redactProcessor) addAuditHits(hits map[string]int64) {
 			continue
 		}
 		rp.auditCounts[ruleID] += count
+	}
+}
+
+func (rp *redactProcessor) recordAuditEvent(ruleID, action, key, signal string, count int64) {
+	if !rp.auditEventsEnabled {
+		return
+	}
+	if strings.TrimSpace(ruleID) == "" || count <= 0 {
+		return
+	}
+	event := auditEvent{
+		RuleID:    ruleID,
+		Action:    action,
+		Key:       key,
+		Signal:    signal,
+		Count:     count,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	rp.auditMu.Lock()
+	defer rp.auditMu.Unlock()
+	if len(rp.auditEvents) >= rp.auditEventBufferMax {
+		rp.auditEvents = rp.auditEvents[1:]
+	}
+	rp.auditEvents = append(rp.auditEvents, event)
+}
+
+func (rp *redactProcessor) auditRecorder(signal string) auditRecorder {
+	if !rp.auditEventsEnabled {
+		return nil
+	}
+	return func(ruleID, action, key, signalOverride string, count int64) {
+		s := signal
+		if strings.TrimSpace(signalOverride) != "" {
+			s = signalOverride
+		}
+		rp.recordAuditEvent(ruleID, action, key, s, count)
+	}
+}
+
+func (rp *redactProcessor) flushAuditEvents(ctx context.Context) {
+	if !rp.auditEventsEnabled {
+		return
+	}
+	events := rp.drainAuditEvents()
+	if len(events) == 0 {
+		return
+	}
+	maxBatch := rp.auditEventsMaxBatch
+	for i := 0; i < len(events); i += maxBatch {
+		end := i + maxBatch
+		if end > len(events) {
+			end = len(events)
+		}
+		batch := events[i:end]
+		if err := rp.postAuditEvents(ctx, batch); err != nil {
+			rp.logger.Warn("failed to post audit events", zap.Int("count", len(batch)), zap.Error(err))
+			rp.mergeAuditEvents(batch)
+		}
+	}
+}
+
+func (rp *redactProcessor) drainAuditEvents() []auditEvent {
+	rp.auditMu.Lock()
+	defer rp.auditMu.Unlock()
+	if len(rp.auditEvents) == 0 {
+		return nil
+	}
+	out := make([]auditEvent, len(rp.auditEvents))
+	copy(out, rp.auditEvents)
+	rp.auditEvents = nil
+	return out
+}
+
+func (rp *redactProcessor) mergeAuditEvents(events []auditEvent) {
+	if len(events) == 0 {
+		return
+	}
+	rp.auditMu.Lock()
+	defer rp.auditMu.Unlock()
+	for _, ev := range events {
+		if len(rp.auditEvents) >= rp.auditEventBufferMax {
+			rp.auditEvents = rp.auditEvents[1:]
+		}
+		rp.auditEvents = append(rp.auditEvents, ev)
 	}
 }
 
@@ -465,6 +583,14 @@ func (rp *redactProcessor) resolveAuditEndpoint() string {
 	return strings.ReplaceAll(rp.auditEndpoint, "{tenant_id}", tenantID)
 }
 
+func (rp *redactProcessor) resolveAuditEventsEndpoint() string {
+	tenantID := strings.TrimSpace(rp.auditTenantID)
+	if tenantID == "" {
+		return rp.auditEventsEndpoint
+	}
+	return strings.ReplaceAll(rp.auditEventsEndpoint, "{tenant_id}", tenantID)
+}
+
 func (rp *redactProcessor) postAuditCount(ctx context.Context, ruleID string, count int64) error {
 	payload := map[string]any{
 		"ruleId": ruleID,
@@ -492,6 +618,39 @@ func (rp *redactProcessor) postAuditCount(ctx context.Context, ruleID string, co
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("audit endpoint returned %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
+
+func (rp *redactProcessor) postAuditEvents(ctx context.Context, events []auditEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	payload := map[string]any{
+		"events": events,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rp.resolveAuditEventsEndpoint(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if rp.auditAPIKey != "" {
+		req.Header.Set("X-API-Key", rp.auditAPIKey)
+		req.Header.Set("Authorization", "Bearer "+rp.auditAPIKey)
+	}
+
+	resp, err := rp.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("audit events endpoint returned %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	return nil
 }
@@ -611,11 +770,11 @@ func loadPolicyFromFile(path string) (*policyFile, error) {
 	return &policy, nil
 }
 
-func (p *compiledPolicy) applyResourceAttributes(attrs pcommon.Map, hits map[string]int64) {
-	p.applyAttributeRules(attrs, p.maskResourceRules, hits)
+func (p *compiledPolicy) applyResourceAttributes(attrs pcommon.Map, hits map[string]int64, recorder auditRecorder, signal string) {
+	p.applyAttributeRules(attrs, p.maskResourceRules, hits, recorder, signal)
 }
 
-func (p *compiledPolicy) applyAttributeRules(attrs pcommon.Map, maskRules map[string][]maskRule, hits map[string]int64) {
+func (p *compiledPolicy) applyAttributeRules(attrs pcommon.Map, maskRules map[string][]maskRule, hits map[string]int64, recorder auditRecorder, signal string) {
 	if attrs.Len() == 0 {
 		return
 	}
@@ -623,6 +782,9 @@ func (p *compiledPolicy) applyAttributeRules(attrs pcommon.Map, maskRules map[st
 	for key, ruleID := range p.dropKeys {
 		if attrs.Remove(key) {
 			addRuleHit(hits, ruleID, 1)
+			if recorder != nil {
+				recorder(ruleID, "drop", key, signal, 1)
+			}
 		}
 	}
 
@@ -638,6 +800,9 @@ func (p *compiledPolicy) applyAttributeRules(attrs pcommon.Map, maskRules map[st
 		tokenized := hmacToken(secret, val.Str())
 		if tokenized != val.Str() {
 			addRuleHit(hits, tokenCfg.ruleID, 1)
+			if recorder != nil {
+				recorder(tokenCfg.ruleID, "tokenize", key, signal, 1)
+			}
 		}
 		val.SetStr(tokenized)
 	}
@@ -647,11 +812,11 @@ func (p *compiledPolicy) applyAttributeRules(attrs pcommon.Map, maskRules map[st
 		if !ok || val.Type() != pcommon.ValueTypeStr {
 			continue
 		}
-		val.SetStr(applyMaskRules(val.Str(), rules, hits))
+		val.SetStr(applyMaskRules(val.Str(), rules, hits, recorder, key, signal))
 	}
 }
 
-func applyMaskRules(value string, rules []maskRule, hits map[string]int64) string {
+func applyMaskRules(value string, rules []maskRule, hits map[string]int64, recorder auditRecorder, key, signal string) string {
 	if value == "" || len(rules) == 0 {
 		return value
 	}
@@ -660,6 +825,9 @@ func applyMaskRules(value string, rules []maskRule, hits map[string]int64) strin
 		matchCount := len(rule.re.FindAllStringIndex(masked, -1))
 		if matchCount > 0 {
 			addRuleHit(hits, rule.ruleID, int64(matchCount))
+			if recorder != nil {
+				recorder(rule.ruleID, "mask", key, signal, int64(matchCount))
+			}
 		}
 		masked = rule.re.ReplaceAllString(masked, rule.replacement)
 	}

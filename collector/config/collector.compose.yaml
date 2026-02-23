@@ -25,6 +25,9 @@ processors:
       tenant_id: "demo"
       flush_interval: "10s"
       timeout: "3s"
+      events_enabled: true
+      events_endpoint: "http://controlplane:8081/tenants/{tenant_id}/audit/events"
+      events_max_batch: 200
     hmac_secrets:
       tenant_hmac_key: "local_dev_secret"
     rules:
