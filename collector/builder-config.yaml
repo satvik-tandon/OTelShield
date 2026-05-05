@@ -1,0 +1,25 @@
+dist:
+  name: otelshieldcol
+  module: github.com/otelshield/otelshield/collector
+  description: OTelShield Collector
+  version: 0.1.0
+  output_path: ./dist
+  go: go
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.143.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.143.0
+
+processors:
+  - gomod: github.com/otelshield/otelshield/collector/processors/redactprocessor v0.0.0
+    path: ./processors/redactprocessor
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.143.0
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.143.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.143.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.143.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter v0.143.0
+ 

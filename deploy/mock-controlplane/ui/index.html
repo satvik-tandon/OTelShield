@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OTelShield Control Plane</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+      :root {
+        --bg: #f6f4ef;
+        --bg-alt: #f1ede6;
+        --panel: #ffffff;
+        --panel-alt: #faf8f4;
+        --text: #1e2329;
+        --muted: #637083;
+        --border: #e4dfd6;
+        --accent: #2a9d8f;
+        --accent-2: #f4a261;
+        --accent-3: #264653;
+        --good: #2a9d8f;
+        --warn: #e76f51;
+        --shadow: 0 10px 30px rgba(38, 70, 83, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: radial-gradient(1200px 700px at 20% -20%, #fff7ea 0%, transparent 70%),
+          radial-gradient(900px 500px at 95% 10%, #e6f7f4 0%, transparent 65%),
+          var(--bg);
+        color: var(--text);
+      }
+
+      .app {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 28px 28px 40px;
+        display: grid;
+        gap: 20px;
+      }
+
+      header {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 20px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        box-shadow: var(--shadow);
+      }
+
+      .brand {
+        display: grid;
+        gap: 6px;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0.2px;
+      }
+
+      .brand p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .badge {
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(42, 157, 143, 0.12);
+        color: var(--accent-3);
+        border: 1px solid rgba(42, 157, 143, 0.3);
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 14px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: var(--shadow);
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      .panel-title {
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      .panel-subtitle {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      input, button, textarea {
+        font-family: inherit;
+      }
+
+      input, textarea {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--panel-alt);
+        color: var(--text);
+        padding: 10px 12px;
+        font-size: 14px;
+        transition: border 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      input:focus, textarea:focus {
+        outline: none;
+        border-color: rgba(42, 157, 143, 0.5);
+        box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.12);
+      }
+
+      textarea {
+        min-height: 220px;
+        font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .btn {
+        border: none;
+        border-radius: 12px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 14px;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+      }
+
+      .btn:active {
+        transform: translateY(1px);
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, var(--accent), #1b7f72);
+        color: white;
+        box-shadow: 0 10px 20px rgba(42, 157, 143, 0.2);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text);
+      }
+
+      .btn-secondary {
+        background: rgba(244, 162, 97, 0.18);
+        color: var(--accent-3);
+        border: 1px solid rgba(244, 162, 97, 0.35);
+      }
+
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .status .ok {
+        color: var(--good);
+        font-weight: 600;
+      }
+
+      .status .warn {
+        color: var(--warn);
+        font-weight: 600;
+      }
+
+      .inline {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .inline > * {
+        flex: 1;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 16px;
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      .table th {
+        text-align: left;
+        font-weight: 600;
+        padding: 10px 8px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        background: var(--panel-alt);
+      }
+
+      .table td {
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .chart {
+        height: 220px;
+        background: var(--panel-alt);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .divider {
+        height: 1px;
+        background: var(--border);
+        margin: 12px 0;
+      }
+
+      @media (max-width: 1080px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+        .toolbar {
+          grid-template-columns: repeat(6, 1fr);
+        }
+      }
+
+      @media (max-width: 720px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+        .inline {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .inline > * {
+          flex: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="brand">
+          <h1>OTelShield Control Plane</h1>
+          <p>Policy management + redaction audit (local mock control plane)</p>
+        </div>
+        <span class="badge">Local Dev</span>
+      </header>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Workspace</div>
+            <div class="panel-subtitle">Define tenant scope and time window</div>
+          </div>
+          <div class="status" id="healthStatus">Health: unknown</div>
+        </div>
+        <div class="toolbar">
+          <div class="field" style="grid-column: span 4;">
+            <label>Tenant ID</label>
+            <input id="tenant" value="demo" />
+          </div>
+          <div class="field" style="grid-column: span 3;">
+            <label>Day (YYYY-MM-DD)</label>
+            <input id="day" />
+          </div>
+          <div class="field" style="grid-column: span 2;">
+            <label>Auto Refresh</label>
+            <button class="btn btn-ghost" id="toggleAuto">Start</button>
+          </div>
+          <div class="field" style="grid-column: span 2;">
+            <label>Interval (seconds)</label>
+            <input id="interval" type="number" min="5" value="10" />
+          </div>
+          <div class="field" style="grid-column: span 1;">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" id="refresh">Refresh</button>
+          </div>
+          <div class="field" style="grid-column: span 1;">
+            <label>&nbsp;</label>
+            <button class="btn btn-secondary" id="health">Check Health</button>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="inline">
+          <div class="field">
+            <label>Filter Rule ID</label>
+            <input id="filter" placeholder="mask.email" />
+          </div>
+          <div class="field">
+            <label>Action Filter</label>
+            <input id="actionFilter" placeholder="mask" />
+          </div>
+          <div class="field">
+            <label>Signal Filter</label>
+            <input id="signalFilter" placeholder="logs" />
+          </div>
+          <div class="field">
+            <label>Key Contains</label>
+            <input id="keyFilter" placeholder="http.request.header" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn btn-ghost" id="clearFilters">Clear Filters</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Policy Draft</div>
+            <div class="panel-subtitle" id="policyMeta"></div>
+          </div>
+          <div class="inline" style="flex: 0 0 auto;">
+            <button class="btn btn-ghost" id="loadPolicy">Load Active Policy</button>
+            <button class="btn btn-primary" id="savePolicy">Apply Draft as Active</button>
+          </div>
+        </div>
+        <textarea id="policyEditor"></textarea>
+        <div class="status" id="policyStatus"></div>
+      </section>
+
+      <div class="grid-2">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Audit Counts</div>
+              <div class="panel-subtitle">Rule-level totals for the selected day</div>
+            </div>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Rule ID</th>
+                <th>Count</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="auditRows"></tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Redactions Over Time</div>
+              <div class="panel-subtitle">Last 30 refreshes</div>
+            </div>
+            <div class="inline" style="flex: 0 0 auto;">
+              <button class="btn btn-ghost" id="resetZoom">Reset Zoom</button>
+            </div>
+          </div>
+          <canvas id="chart" class="chart"></canvas>
+          <div class="legend" id="legend"></div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Audit Events</div>
+            <div class="panel-subtitle" id="eventsMeta"></div>
+          </div>
+          <button class="btn btn-ghost" id="loadMoreEvents">Load more</button>
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Rule ID</th>
+              <th>Action</th>
+              <th>Key</th>
+              <th>Signal</th>
+              <th>Count</th>
+            </tr>
+          </thead>
+          <tbody id="eventRows"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <script>
+      const tenantEl = document.getElementById("tenant");
+      const dayEl = document.getElementById("day");
+      const policyEditorEl = document.getElementById("policyEditor");
+      const policyMetaEl = document.getElementById("policyMeta");
+      const policyStatusEl = document.getElementById("policyStatus");
+      const auditRowsEl = document.getElementById("auditRows");
+      const healthStatusEl = document.getElementById("healthStatus");
+      const filterEl = document.getElementById("filter");
+      const actionFilterEl = document.getElementById("actionFilter");
+      const signalFilterEl = document.getElementById("signalFilter");
+      const keyFilterEl = document.getElementById("keyFilter");
+      const clearFiltersEl = document.getElementById("clearFilters");
+      const intervalEl = document.getElementById("interval");
+      const toggleAutoEl = document.getElementById("toggleAuto");
+      const healthBtnEl = document.getElementById("health");
+      const chartEl = document.getElementById("chart");
+      const legendEl = document.getElementById("legend");
+      const eventRowsEl = document.getElementById("eventRows");
+      const resetZoomEl = document.getElementById("resetZoom");
+      const loadMoreEventsEl = document.getElementById("loadMoreEvents");
+      const eventsMetaEl = document.getElementById("eventsMeta");
+
+      let autoTimer = null;
+      let viewStart = null;
+      let viewEnd = null;
+      let dragState = null;
+      const hiddenRules = new Set();
+      let lastAuditRows = [];
+      let eventsCursor = null;
+      let loadedEvents = [];
+      let eventsLoading = false;
+      const history = {};
+      const maxHistory = 30;
+      const palette = ["#38bdf8", "#22c55e", "#f97316", "#a78bfa", "#f43f5e", "#14b8a6"];
+      const filterStorageKey = "otelshield.filters.v1";
+
+      function today() {
+        const d = new Date();
+        return d.toISOString().slice(0, 10);
+      }
+
+      dayEl.value = today();
+
+      function loadFilters() {
+        try {
+          const raw = localStorage.getItem(filterStorageKey);
+          if (!raw) return;
+          const saved = JSON.parse(raw);
+          if (saved && typeof saved === "object") {
+            if (typeof saved.ruleId === "string") filterEl.value = saved.ruleId;
+            if (typeof saved.action === "string") actionFilterEl.value = saved.action;
+            if (typeof saved.signal === "string") signalFilterEl.value = saved.signal;
+            if (typeof saved.key === "string") keyFilterEl.value = saved.key;
+          }
+        } catch (_) {
+          // ignore corrupt storage
+        }
+      }
+
+      function saveFilters() {
+        const payload = {
+          ruleId: filterEl.value,
+          action: actionFilterEl.value,
+          signal: signalFilterEl.value,
+          key: keyFilterEl.value,
+        };
+        try {
+          localStorage.setItem(filterStorageKey, JSON.stringify(payload));
+        } catch (_) {
+          // ignore storage errors
+        }
+      }
+
+      async function fetchJson(path, init) {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        return res.json();
+      }
+
+      function renderPolicy(data) {
+        policyMetaEl.textContent = `Active policy | Tenant: ${data.tenantId} | Version: ${data.version} | Updated: ${data.updatedAt}`;
+        policyEditorEl.value = JSON.stringify(data.policy, null, 2);
+      }
+
+      function renderAudit(data) {
+        auditRowsEl.innerHTML = "";
+        const rows = data.counts || [];
+        const filter = filterEl.value.trim().toLowerCase();
+        const filtered = filter ? rows.filter(r => (r.ruleId || "").toLowerCase().includes(filter)) : rows;
+        if (filtered.length === 0) {
+          auditRowsEl.innerHTML = "<tr><td colspan=\"3\" class=\"muted\">No audit counts yet</td></tr>";
+          return;
+        }
+        filtered.sort((a, b) => (a.ruleId || "").localeCompare(b.ruleId || ""));
+        for (const row of filtered) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${row.ruleId || "-"}</td><td>${row.count ?? 0}</td><td>${formatTime(row.updatedAt)}</td>`;
+          auditRowsEl.appendChild(tr);
+        }
+      }
+
+      function updateHistory(rows) {
+        const ts = Date.now();
+        rows.forEach((row) => {
+          const rule = row.ruleId || "unknown";
+          if (!history[rule]) history[rule] = [];
+          history[rule].push({ t: ts, v: Number(row.count || 0) });
+          if (history[rule].length > maxHistory) history[rule].shift();
+        });
+      }
+
+      function drawChart(rows) {
+        const ctx = chartEl.getContext("2d");
+        const width = chartEl.clientWidth;
+        const height = chartEl.clientHeight;
+        chartEl.width = width;
+        chartEl.height = height;
+        ctx.clearRect(0, 0, width, height);
+
+        const filter = filterEl.value.trim().toLowerCase();
+        const rules = rows
+          .map(r => r.ruleId || "unknown")
+          .filter(r => !filter || r.toLowerCase().includes(filter))
+          .filter(r => !hiddenRules.has(r));
+
+        const topRules = rules.slice(0, palette.length);
+        const series = topRules.map(r => history[r] || []);
+        const padding = 10;
+        const plotW = width - padding * 2;
+        const plotH = height - padding * 2;
+        const rangeStart = viewStart ?? 0;
+        const rangeEnd = viewEnd ?? (maxHistory - 1);
+        const rangeLen = Math.max(1, rangeEnd - rangeStart);
+        const maxVal = Math.max(1, ...series.flatMap(s => s.map(p => p.v)));
+
+        legendEl.innerHTML = "";
+        topRules.forEach((rule, idx) => {
+          const color = palette[idx % palette.length];
+          const legendItem = document.createElement("span");
+          legendItem.innerHTML = `<span class=\"dot\" style=\"background:${color}\"></span>${rule}`;
+          legendItem.style.cursor = "pointer";
+          legendItem.style.opacity = hiddenRules.has(rule) ? "0.4" : "1";
+          legendItem.addEventListener("click", () => {
+            if (hiddenRules.has(rule)) hiddenRules.delete(rule); else hiddenRules.add(rule);
+            drawChart(rows);
+          });
+          legendEl.appendChild(legendItem);
+        });
+
+        if (topRules.length === 0) return;
+
+        topRules.forEach((rule, idx) => {
+          const color = palette[idx % palette.length];
+          const points = history[rule] || [];
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          for (let i = rangeStart; i <= rangeEnd; i++) {
+            const p = points[i];
+            const v = p ? p.v : 0;
+            const x = padding + ((i - rangeStart) / rangeLen) * plotW;
+            const y = padding + plotH - (v / maxVal) * plotH;
+            if (i === rangeStart) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        });
+
+        if (dragState) {
+          const x1 = Math.min(dragState.startX, dragState.currentX);
+          const x2 = Math.max(dragState.startX, dragState.currentX);
+          ctx.fillStyle = "rgba(148,163,184,0.2)";
+          ctx.fillRect(x1, padding, x2 - x1, plotH);
+        }
+      }
+
+      async function refresh() {
+        const tenant = tenantEl.value.trim() || "demo";
+        const day = dayEl.value.trim() || today();
+
+        try {
+          const policy = await fetchJson(`/tenants/${tenant}/policy/active`);
+          renderPolicy(policy);
+        } catch (err) {
+          policyMetaEl.textContent = "Failed to load policy";
+          policyEditorEl.value = String(err);
+        }
+
+        try {
+          const audit = await fetchJson(`/tenants/${tenant}/audit?day=${encodeURIComponent(day)}`);
+          lastAuditRows = audit.counts || [];
+          renderAudit(audit);
+          updateHistory(lastAuditRows);
+          drawChart(lastAuditRows);
+        } catch (err) {
+          auditRowsEl.innerHTML = `<tr><td colspan="3" class="muted">${String(err)}</td></tr>`;
+        }
+
+        await refreshEvents();
+      }
+
+      async function checkHealth() {
+        const previousLabel = healthBtnEl.textContent;
+        healthBtnEl.disabled = true;
+        healthBtnEl.textContent = "Checking...";
+        const checkedAt = new Date();
+        try {
+          const health = await fetchJson("/health");
+          healthStatusEl.innerHTML = `Health: <span class="${health.ok ? "ok" : "warn"}">${health.ok ? "ok" : "not ok"}</span> · checked ${checkedAt.toLocaleTimeString()}`;
+        } catch (err) {
+          healthStatusEl.innerHTML = `Health: <span class="warn">error</span> · checked ${checkedAt.toLocaleTimeString()}`;
+        } finally {
+          healthBtnEl.disabled = false;
+          healthBtnEl.textContent = previousLabel;
+        }
+      }
+
+      async function savePolicy() {
+        const tenant = tenantEl.value.trim() || "demo";
+        let policy;
+        try {
+          policy = JSON.parse(policyEditorEl.value);
+        } catch (err) {
+          policyStatusEl.textContent = "Invalid JSON policy";
+          policyStatusEl.className = "status warn";
+          return;
+        }
+        policyStatusEl.textContent = "Applying draft...";
+        try {
+          const res = await fetch(`/tenants/${tenant}/policy`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ policy, activate: true })
+          });
+          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+          policyStatusEl.textContent = "Draft is now active";
+          policyStatusEl.className = "status ok";
+          refresh();
+        } catch (err) {
+          policyStatusEl.textContent = `Save failed: ${err}`;
+          policyStatusEl.className = "status warn";
+        }
+      }
+
+      function toggleAuto() {
+        if (autoTimer) {
+          clearInterval(autoTimer);
+          autoTimer = null;
+          toggleAutoEl.textContent = "Start";
+          return;
+        }
+        const interval = Math.max(5, Number(intervalEl.value || 10));
+        autoTimer = setInterval(refresh, interval * 1000);
+        toggleAutoEl.textContent = "Stop";
+      }
+
+      function renderEvents(events) {
+        const filter = filterEl.value.trim().toLowerCase();
+        const actionFilter = actionFilterEl.value.trim().toLowerCase();
+        const signalFilter = signalFilterEl.value.trim().toLowerCase();
+        const keyFilter = keyFilterEl.value.trim().toLowerCase();
+        let rows = events;
+        if (filter) rows = rows.filter(e => (e.ruleId || "").toLowerCase().includes(filter));
+        if (actionFilter) rows = rows.filter(e => (e.action || "").toLowerCase().includes(actionFilter));
+        if (signalFilter) rows = rows.filter(e => (e.signal || "").toLowerCase().includes(signalFilter));
+        if (keyFilter) rows = rows.filter(e => (e.key || "").toLowerCase().includes(keyFilter));
+
+        eventRowsEl.innerHTML = "";
+        if (rows.length === 0) {
+          eventRowsEl.innerHTML = "<tr><td colspan=\"6\" class=\"muted\">No events yet</td></tr>";
+          return;
+        }
+        rows.slice().reverse().forEach((e) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${formatTime(e.timestamp)}</td><td>${e.ruleId || "-"}</td><td>${e.action || "-"}</td><td>${e.key || "-"}</td><td>${e.signal || "-"}</td><td>${e.count ?? 0}</td>`;
+          eventRowsEl.appendChild(tr);
+        });
+      }
+
+      function formatTime(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+      }
+
+      function updateEventsMeta() {
+        const count = loadedEvents.length;
+        let text = `Showing ${count} event${count === 1 ? "" : "s"}.`;
+        if (eventsCursor) {
+          text += " More available.";
+        }
+        if (eventsLoading) {
+          text += " Loading...";
+        }
+        eventsMetaEl.textContent = text;
+        loadMoreEventsEl.disabled = !eventsCursor || eventsLoading;
+      }
+
+      function buildEventsUrl(tenant, day, cursor) {
+        const params = new URLSearchParams();
+        params.set("day", day);
+        params.set("limit", "200");
+        if (cursor) params.set("cursor", cursor);
+        const rule = filterEl.value.trim();
+        const action = actionFilterEl.value.trim();
+        const signal = signalFilterEl.value.trim();
+        const key = keyFilterEl.value.trim();
+        if (rule) params.set("ruleId", rule);
+        if (action) params.set("action", action);
+        if (signal) params.set("signal", signal);
+        if (key) params.set("key", key);
+        return `/tenants/${tenant}/audit/events?${params.toString()}`;
+      }
+
+      async function refreshEvents() {
+        const tenant = tenantEl.value.trim() || "demo";
+        const day = dayEl.value.trim() || today();
+        eventsLoading = true;
+        updateEventsMeta();
+        try {
+          const events = await fetchJson(buildEventsUrl(tenant, day));
+          loadedEvents = events.events || [];
+          eventsCursor = events.nextCursor || null;
+          renderEvents(loadedEvents);
+        } catch (err) {
+          eventRowsEl.innerHTML = `<tr><td colspan="6" class="muted">${String(err)}</td></tr>`;
+        } finally {
+          eventsLoading = false;
+          updateEventsMeta();
+        }
+      }
+
+      async function loadMoreEvents() {
+        if (!eventsCursor || eventsLoading) return;
+        eventsLoading = true;
+        updateEventsMeta();
+        const tenant = tenantEl.value.trim() || "demo";
+        const day = dayEl.value.trim() || today();
+        try {
+          const events = await fetchJson(buildEventsUrl(tenant, day, eventsCursor));
+          const nextEvents = events.events || [];
+          if (nextEvents.length > 0) {
+            loadedEvents = nextEvents.concat(loadedEvents);
+            renderEvents(loadedEvents);
+          }
+          eventsCursor = events.nextCursor || null;
+        } catch (err) {
+          eventsMetaEl.textContent = `Load failed: ${String(err)}`;
+        } finally {
+          eventsLoading = false;
+          updateEventsMeta();
+        }
+      }
+
+      function resetZoom() {
+        viewStart = null;
+        viewEnd = null;
+        drawChart(lastAuditRows);
+      }
+
+      chartEl.addEventListener("mousedown", (e) => {
+        dragState = { startX: e.offsetX, currentX: e.offsetX };
+      });
+      chartEl.addEventListener("mousemove", (e) => {
+        if (!dragState) return;
+        dragState.currentX = e.offsetX;
+        drawChart(lastAuditRows);
+      });
+      chartEl.addEventListener("mouseup", () => {
+        if (!dragState) return;
+        const width = chartEl.clientWidth;
+        const padding = 10;
+        const plotW = width - padding * 2;
+        const x1 = Math.max(padding, Math.min(dragState.startX, dragState.currentX));
+        const x2 = Math.min(padding + plotW, Math.max(dragState.startX, dragState.currentX));
+        const startIdx = Math.floor(((x1 - padding) / plotW) * (maxHistory - 1));
+        const endIdx = Math.ceil(((x2 - padding) / plotW) * (maxHistory - 1));
+        if (endIdx - startIdx >= 2) {
+          viewStart = startIdx;
+          viewEnd = endIdx;
+        }
+        dragState = null;
+        drawChart(lastAuditRows);
+      });
+      chartEl.addEventListener("mouseleave", () => {
+        dragState = null;
+      });
+
+      document.getElementById("refresh").addEventListener("click", refresh);
+      healthBtnEl.addEventListener("click", checkHealth);
+      document.getElementById("savePolicy").addEventListener("click", savePolicy);
+      document.getElementById("loadPolicy").addEventListener("click", refresh);
+      document.getElementById("toggleAuto").addEventListener("click", toggleAuto);
+      resetZoomEl.addEventListener("click", resetZoom);
+      loadMoreEventsEl.addEventListener("click", loadMoreEvents);
+      filterEl.addEventListener("input", () => {
+        saveFilters();
+        refreshEvents();
+      });
+      actionFilterEl.addEventListener("input", () => {
+        saveFilters();
+        refreshEvents();
+      });
+      signalFilterEl.addEventListener("input", () => {
+        saveFilters();
+        refreshEvents();
+      });
+      keyFilterEl.addEventListener("input", () => {
+        saveFilters();
+        refreshEvents();
+      });
+      clearFiltersEl.addEventListener("click", () => {
+        filterEl.value = "";
+        actionFilterEl.value = "";
+        signalFilterEl.value = "";
+        keyFilterEl.value = "";
+        saveFilters();
+        refresh();
+      });
+
+      loadFilters();
+      refresh();
+      checkHealth();
+    </script>
+  </body>
+</html>

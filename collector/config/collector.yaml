@@ -1,0 +1,88 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  batch: {}
+  redactprocessor:
+    policy_source:
+      mode: "local"
+      file: "/etc/otelcol/policy.yaml"
+      # AWS control plane mode example:
+      # mode: "aws"
+      # endpoint: "https://<api-id>.execute-api.<region>.amazonaws.com/Prod/tenants/{tenant_id}/policy/active"
+      # tenant_id: "demo"
+      # api_key: "<optional-api-key>"
+    audit:
+      enabled: false
+      # endpoint: "https://<api-id>.execute-api.<region>.amazonaws.com/Prod/tenants/{tenant_id}/audit/counts"
+      # events_enabled: true
+      # events_endpoint: "https://<api-id>.execute-api.<region>.amazonaws.com/Prod/tenants/{tenant_id}/audit/events"
+      # events_max_batch: 200
+      # tenant_id: "demo"
+      # api_key: "<optional-api-key>"
+      flush_interval: "15s"
+      timeout: "3s"
+    hmac_secrets:
+      tenant_hmac_key: "local_dev_secret"
+    rules:
+      - id: "drop.secrets"
+        type: "drop_key"
+        match_keys:
+          - "http.request.header.authorization"
+          - "http.request.header.cookie"
+          - "db.statement"
+      - id: "mask.email"
+        type: "mask_regex"
+        fields:
+          - "log.body"
+          - "attributes.exception.message"
+          - "attributes.http.target"
+          - "attributes.url.full"
+        pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+        replacement: "[EMAIL_REDACTED]"
+      - id: "tokenize.user"
+        type: "tokenize_hmac"
+        match_keys:
+          - "enduser.id"
+          - "user.id"
+          - "customer.id"
+        key_id: "tenant_hmac_key"
+
+exporters:
+  otlp/jaeger:
+    endpoint: "jaeger:4317"
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: "0.0.0.0:9464"
+  debug:
+    verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, redactprocessor, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, redactprocessor, batch]
+      exporters: [prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, redactprocessor, batch]
+      exporters: [debug]
