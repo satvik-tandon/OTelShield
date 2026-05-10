@@ -25,65 +25,70 @@ jobs:
           fetch-depth: 2
 
       - name: Index files
-        run: python3 - <<'EOF'
-import os, sys, json, subprocess
-import urllib.request, urllib.error
-
-INDEXER_URL = os.environ['INDEXER_URL'].rstrip('/')
-SECRET      = os.environ['INDEXER_SECRET']
-REPO        = os.environ['GITHUB_REPOSITORY']
-FULL        = os.environ.get('FULL_REINDEX', 'false').lower() == 'true'
-
-SKIP_DIRS = {'.git','node_modules','vendor','__pycache__','.venv','dist','.wrangler','coverage'}
-SKIP_EXTS = {'.lock','.min.js','.min.css','.png','.jpg','.jpeg','.gif','.pdf',
-             '.zip','.exe','.woff','.woff2','.ttf','.ico','.pyc','.class'}
-MAX_BYTES  = 150_000
-
-def skip(p):
-    parts = p.replace('\\','/').split('/')
-    if any(d in SKIP_DIRS for d in parts): return True
-    base = parts[-1]
-    if base.startswith('.env'): return True
-    return os.path.splitext(base)[1].lower() in SKIP_EXTS
-
-def post(path, content):
-    if skip(path): return
-    if len(content.encode()) > MAX_BYTES:
-        print(f'  skip (large): {path}'); return
-    data = json.dumps({'repo': REPO, 'file_path': path, 'content': content}).encode()
-    req  = urllib.request.Request(
-        f'{INDEXER_URL}/index', data=data,
-        headers={'Content-Type':'application/json','x-indexer-secret': SECRET})
-    try:
-        with urllib.request.urlopen(req) as r:
-            res = json.loads(r.read())
-            tag = 'skip' if res.get('skipped') else f"{res.get('vectors',0)} chunks"
-            print(f'  {tag}: {path}')
-    except urllib.error.HTTPError as e:
-        print(f'  ERROR {e.code}: {path}')
-
-if FULL:
-    for root, dirs, files in os.walk('.'):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        for f in files:
-            p = os.path.join(root, f)[2:].replace('\\','/')
-            try:
-                post(p, open(os.path.join(root,f), encoding='utf-8', errors='ignore').read())
-            except: pass
-else:
-    r = subprocess.run(['git','diff','--name-only','HEAD~1','HEAD'],
-                       capture_output=True, text=True)
-    files = r.stdout.strip().split('\n') if r.returncode == 0 else []
-    if not files or files == ['']:
-        r2 = subprocess.run(['git','ls-files'], capture_output=True, text=True)
-        files = r2.stdout.strip().split('\n')
-    for p in files:
-        if p and os.path.isfile(p):
-            try:
-                post(p, open(p, encoding='utf-8', errors='ignore').read())
-            except: pass
-EOF
         env:
           INDEXER_URL: ${{ secrets.INDEXER_URL }}
           INDEXER_SECRET: ${{ secrets.INDEXER_SECRET }}
           FULL_REINDEX: ${{ github.event.inputs.full_reindex || 'false' }}
+        shell: bash
+        run: |
+          cat > /tmp/index_rag.py <<'PYEOF'
+          import os, sys, json, subprocess
+          import urllib.request, urllib.error
+
+          INDEXER_URL = os.environ['INDEXER_URL'].rstrip('/')
+          SECRET      = os.environ['INDEXER_SECRET']
+          REPO        = os.environ['GITHUB_REPOSITORY']
+          FULL        = os.environ.get('FULL_REINDEX', 'false').lower() == 'true'
+
+          SKIP_DIRS = {'.git','node_modules','vendor','__pycache__','.venv','dist','.wrangler','coverage'}
+          SKIP_EXTS = {'.lock','.min.js','.min.css','.png','.jpg','.jpeg','.gif','.pdf',
+                       '.zip','.exe','.woff','.woff2','.ttf','.ico','.pyc','.class'}
+          MAX_BYTES = 150_000
+
+          def skip(p):
+              parts = p.replace('\\','/').split('/')
+              if any(d in SKIP_DIRS for d in parts): return True
+              base = parts[-1]
+              if base.startswith('.env'): return True
+              return os.path.splitext(base)[1].lower() in SKIP_EXTS
+
+          def post(path, content):
+              if skip(path): return
+              if len(content.encode()) > MAX_BYTES:
+                  print(f'  skip (large): {path}'); return
+              data = json.dumps({'repo': REPO, 'file_path': path, 'content': content}).encode()
+              req = urllib.request.Request(
+                  f'{INDEXER_URL}/index', data=data,
+                  headers={'Content-Type':'application/json','x-indexer-secret': SECRET})
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      res = json.loads(r.read())
+                      tag = 'skip' if res.get('skipped') else f"{res.get('vectors',0)} chunks"
+                      print(f'  {tag}: {path}')
+              except urllib.error.HTTPError as e:
+                  print(f'  ERROR {e.code}: {path}')
+
+          if FULL:
+              for root, dirs, files in os.walk('.'):
+                  dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+                  for f in files:
+                      p = os.path.join(root, f)[2:].replace('\\','/')
+                      try:
+                          post(p, open(os.path.join(root,f), encoding='utf-8', errors='ignore').read())
+                      except Exception:
+                          pass
+          else:
+              r = subprocess.run(['git','diff','--name-only','HEAD~1','HEAD'],
+                                 capture_output=True, text=True)
+              files = r.stdout.strip().split('\n') if r.returncode == 0 else []
+              if not files or files == ['']:
+                  r2 = subprocess.run(['git','ls-files'], capture_output=True, text=True)
+                  files = r2.stdout.strip().split('\n')
+              for p in files:
+                  if p and os.path.isfile(p):
+                      try:
+                          post(p, open(p, encoding='utf-8', errors='ignore').read())
+                      except Exception:
+                          pass
+          PYEOF
+          python3 /tmp/index_rag.py
