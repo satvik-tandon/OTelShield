@@ -41,8 +41,16 @@ jobs:
           FULL        = os.environ.get('FULL_REINDEX', 'false').lower() == 'true'
 
           SKIP_DIRS = {'.git','node_modules','vendor','__pycache__','.venv','dist','.wrangler','coverage'}
-          SKIP_EXTS = {'.lock','.min.js','.min.css','.png','.jpg','.jpeg','.gif','.pdf',
-                       '.zip','.exe','.woff','.woff2','.ttf','.ico','.pyc','.class'}
+          SKIP_EXTS = {'.lock','.min.js','.min.css',
+                       '.png','.jpg','.jpeg','.gif','.svg','.ico','.bmp','.tiff',
+                       '.webp','.avif','.heic','.heif',
+                       '.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx',
+                       '.zip','.tar','.gz','.tgz','.rar','.7z','.exe','.dll','.so','.a',
+                       '.o','.obj','.bin','.dat','.dmg','.iso',
+                       '.mp3','.wav','.ogg','.flac','.m4a','.aac',
+                       '.mp4','.mov','.avi','.mkv','.webm','.flv',
+                       '.woff','.woff2','.ttf','.otf','.eot',
+                       '.pyc','.pyo','.class','.jar'}
           MAX_BYTES = 150_000
 
           def skip(p):
