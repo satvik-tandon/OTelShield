@@ -16,9 +16,14 @@ on:
         type: boolean
         default: false
 
+# Least privilege: only need to read the repo contents
+permissions:
+  contents: read
+
 jobs:
   index:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
